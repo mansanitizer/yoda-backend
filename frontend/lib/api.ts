@@ -1,5 +1,5 @@
 import { apiClient } from './api-client';
-import { UserData, SessionData } from './data';
+import { UserData, SessionData } from './types';
 
 export interface CreateUserPayload {
   username: string;

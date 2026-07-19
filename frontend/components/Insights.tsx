@@ -1,6 +1,6 @@
 'use client';
 import { Card, Icon } from './ui';
-import { Insight } from '@/lib/data';
+import { Insight } from '@/lib/types';
 
 const sectionTitle = { fontFamily: 'var(--font-display)', fontWeight: 800 as const, fontSize: 22, color: 'var(--text-primary)' };
 

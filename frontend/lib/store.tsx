@@ -1,6 +1,6 @@
 'use client';
 import React, { createContext, useCallback, useContext, useState } from 'react';
-import { UserData } from './data';
+import { UserData } from './types';
 import { api } from './api';
 import { useQuery } from './hooks';
 

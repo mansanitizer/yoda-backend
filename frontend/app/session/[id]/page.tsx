@@ -7,7 +7,8 @@ import { Insights } from '@/components/Insights';
 import { useApp } from '@/lib/store';
 import { useQuery } from '@/lib/hooks';
 import { api } from '@/lib/api';
-import { genInsights, UserData } from '@/lib/data';
+import { genInsights } from '@/lib/data';
+import { UserData } from '@/lib/types';
 
 const label = { fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 as const };
 

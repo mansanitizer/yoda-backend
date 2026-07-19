@@ -1,6 +1,6 @@
 'use client';
 import { Card, Icon } from './ui';
-import { UserData } from '@/lib/data';
+import { UserData } from '@/lib/types';
 import { useCountUp } from '@/lib/hooks';
 
 const label = { fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 as const };

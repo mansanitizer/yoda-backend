@@ -1,6 +1,6 @@
 'use client';
 import { Card, Badge, Icon } from './ui';
-import { SessionData } from '@/lib/data';
+import { SessionData } from '@/lib/types';
 
 const sectionTitle = { fontFamily: 'var(--font-display)', fontWeight: 800 as const, fontSize: 22, color: 'var(--text-primary)' };
 

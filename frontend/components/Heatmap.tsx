@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Card } from './ui';
-import { UserData } from '@/lib/data';
+import { UserData } from '@/lib/types';
 
 const sectionTitle = { fontFamily: 'var(--font-display)', fontWeight: 800 as const, fontSize: 22, color: 'var(--text-primary)' };
 const heatColors = ['var(--ink-800)', 'var(--accent-right-tint)', 'rgba(214,255,63,.35)', 'rgba(214,255,63,.65)', 'var(--accent-right)'];

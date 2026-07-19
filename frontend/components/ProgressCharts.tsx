@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
 import { Card } from './ui';
-import { UserData, buildChart, ChartPoint } from '@/lib/data';
+import { buildChart, ChartPoint } from '@/lib/data';
+import { UserData } from '@/lib/types';
 
 const sectionTitle = { fontFamily: 'var(--font-display)', fontWeight: 800 as const, fontSize: 22, color: 'var(--text-primary)' };
 
