@@ -4,6 +4,7 @@ import base64
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -12,9 +13,10 @@ import cv2
 import numpy as np
 
 from app.core.reaction_service import random_movement_target
+from app.core.rover_command_bridge import dispatch_movement_target
 from app.core.state_machine import CommandResult, EventStatus, PunchSide, RobotCommand, SessionState
 from app.detection.detector_service import SessionDetector
-from app.storage.db import DEFAULT_USER_ID, DEFAULT_USERNAME, finalize_event, insert_event, upsert_session, upsert_user
+from app.storage.db import finalize_event, get_active_user, insert_event, upsert_session
 
 
 def utc_now() -> str:
@@ -26,11 +28,18 @@ class SessionRuntime:
     session_id: str
     started_at: str
     updated_at: str
+    user_id: str
+    username: str
     state: SessionState = SessionState.IDLE
     current_command: Optional[RobotCommand] = None
     current_event_id: Optional[str] = None
     command_displayed_at: Optional[str] = None
     moving_until: Optional[float] = None
+    trainer_pending_punches: int = 0
+    trainer_total_punches: int = 0
+    trainer_recent_movements: deque[str] = field(default_factory=lambda: deque(maxlen=4))
+    trainer_last_command: Optional[dict] = None
+    trainer_last_dispatch: Optional[dict] = None
     latest_frame_jpeg: bytes = b""
     detector: SessionDetector = field(default_factory=SessionDetector)
 
@@ -42,11 +51,17 @@ class SessionManager:
 
     def create_session(self) -> SessionRuntime:
         with self.lock:
+            active_user = get_active_user()
             session_id = str(uuid.uuid4())
             now = utc_now()
-            session = SessionRuntime(session_id=session_id, started_at=now, updated_at=now)
+            session = SessionRuntime(
+                session_id=session_id,
+                started_at=now,
+                updated_at=now,
+                user_id=active_user["user_id"],
+                username=active_user["username"],
+            )
             self.sessions[session_id] = session
-            upsert_user(DEFAULT_USER_ID, DEFAULT_USERNAME)
             self._persist(session)
             return session
 
@@ -76,8 +91,12 @@ class SessionManager:
                 session.current_command = command
                 session.current_event_id = None
                 session.command_displayed_at = now
-                session.moving_until = time.time() + 3.0
-                movement_target = random_movement_target()
+                movement_target = random_movement_target(recent_movements=list(session.trainer_recent_movements))
+                session.moving_until = time.time() + movement_target["duration_s"]
+                session.trainer_last_command = movement_target
+                session.trainer_recent_movements.append(movement_target["movement"])
+                session.trainer_pending_punches = 0
+                session.trainer_last_dispatch = self._dispatch_rover_movement(movement_target)
                 self._persist(session)
                 return CommandResult(status="OK", state=session.state, message="Movement plan created", movement_target=movement_target)
 
@@ -105,10 +124,27 @@ class SessionManager:
             detection, debug_jpeg = session.detector.process_frame(frame)
             session.latest_frame_jpeg = debug_jpeg
             session.updated_at = utc_now()
+            trainer_event = self._maybe_trigger_trainer_movement(session, detection)
 
             if session.state not in (SessionState.WAITING_FOR_LEFT, SessionState.WAITING_FOR_RIGHT):
                 self._persist(session)
-                return {"status": "OK", "state": session.state.value}
+                payload = {
+                    "status": "OK",
+                    "state": session.state.value,
+                    "trainer": self._build_trainer_payload(session),
+                }
+                if detection and detection.action != PunchSide.NONE:
+                    payload.update(
+                        {
+                            "action": detection.action.value,
+                            "punch_type": detection.punch_type,
+                            "confidence": detection.confidence,
+                        }
+                    )
+                if trainer_event:
+                    payload["trainer_event"] = trainer_event
+                    payload["movement_target"] = trainer_event["movement_target"]
+                return payload
 
             expected_action = PunchSide.LEFT if session.state == SessionState.WAITING_FOR_LEFT else PunchSide.RIGHT
             if detection and detection.action != PunchSide.NONE:
@@ -130,6 +166,7 @@ class SessionManager:
                     "punch_type": detection.punch_type,
                     "confidence": detection.confidence,
                     "result": status.value,
+                    "trainer": self._build_trainer_payload(session),
                 }
 
             command_age = time.time() - datetime.fromisoformat(session.command_displayed_at).timestamp()
@@ -137,10 +174,15 @@ class SessionManager:
                 finalize_event(session.current_event_id, PunchSide.NONE.value, utc_now(), EventStatus.TIMEOUT.value, None)
                 session.state = SessionState.TIMEOUT
                 self._persist(session)
-                return {"status": "OK", "state": session.state.value, "result": EventStatus.TIMEOUT.value}
+                return {
+                    "status": "OK",
+                    "state": session.state.value,
+                    "result": EventStatus.TIMEOUT.value,
+                    "trainer": self._build_trainer_payload(session),
+                }
 
             self._persist(session)
-            return {"status": "OK", "state": session.state.value}
+            return {"status": "OK", "state": session.state.value, "trainer": self._build_trainer_payload(session)}
 
     def build_status_payload(self, session_id: str) -> dict:
         session = self.get_session(session_id)
@@ -148,10 +190,13 @@ class SessionManager:
             raise KeyError(session_id)
         return {
             "session_id": session.session_id,
+            "user_id": session.user_id,
+            "username": session.username,
             "state": session.state.value,
             "current_command": session.current_command.value if session.current_command else None,
             "event_id": session.current_event_id,
             "updated_at": session.updated_at,
+            "trainer": self._build_trainer_payload(session),
         }
 
     def latest_frame(self, session_id: str) -> Optional[bytes]:
@@ -177,6 +222,67 @@ class SessionManager:
             session.updated_at = utc_now()
             self._persist(session)
 
+    def _maybe_trigger_trainer_movement(self, session: SessionRuntime, detection) -> Optional[dict]:
+        if not detection or detection.action == PunchSide.NONE:
+            return None
+
+        trainer_ready_states = {SessionState.IDLE, SessionState.DETECTED, SessionState.TIMEOUT}
+        if session.state not in trainer_ready_states:
+            return None
+
+        now = utc_now()
+        event_id = str(uuid.uuid4())
+        insert_event(event_id, session.session_id, now, detection.action.value, EventStatus.PENDING.value)
+        finalize_event(event_id, detection.action.value, now, EventStatus.MATCH.value, detection.confidence)
+
+        session.trainer_total_punches += 1
+        session.trainer_pending_punches += 1
+        session.current_event_id = event_id
+        session.state = SessionState.DETECTED
+
+        if session.trainer_pending_punches < 3:
+            return None
+
+        movement_target = random_movement_target(recent_movements=list(session.trainer_recent_movements))
+        session.trainer_pending_punches = 0
+        session.trainer_last_command = movement_target
+        session.trainer_recent_movements.append(movement_target["movement"])
+        session.trainer_last_dispatch = self._dispatch_rover_movement(movement_target)
+        session.state = SessionState.MOVING
+        session.current_command = RobotCommand.MOVE
+        session.command_displayed_at = now
+        session.moving_until = time.time() + movement_target["duration_s"]
+        return {
+            "type": "AUTO_MOVE",
+            "trigger": "THREE_PUNCHES_DETECTED",
+            "movement_target": movement_target,
+            "dispatch": session.trainer_last_dispatch,
+            "detected_punch": {
+                "action": detection.action.value,
+                "punch_type": detection.punch_type,
+                "confidence": detection.confidence,
+            },
+        }
+
+    @staticmethod
+    def _build_trainer_payload(session: SessionRuntime) -> dict:
+        return {
+            "pending_punches": session.trainer_pending_punches,
+            "total_punches": session.trainer_total_punches,
+            "trigger_threshold": 3,
+            "recent_movements": list(session.trainer_recent_movements),
+            "last_command": session.trainer_last_command,
+            "last_dispatch": session.trainer_last_dispatch,
+        }
+
+    @staticmethod
+    def _dispatch_rover_movement(movement_target: dict) -> dict:
+        try:
+            result = dispatch_movement_target(movement_target)
+            return {"status": "OK", **result}
+        except OSError as exc:
+            return {"status": "ERROR", "message": str(exc)}
+
     def _persist(self, session: SessionRuntime) -> None:
         upsert_session(
             session.session_id,
@@ -185,6 +291,8 @@ class SessionManager:
             session.state.value,
             session.current_command.value if session.current_command else None,
             session.current_event_id,
+            session.user_id,
+            session.username,
         )
 
 
