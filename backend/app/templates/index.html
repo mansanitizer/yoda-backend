@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boxing AI - Choose Your Mode</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+    <div class="background-container">
+        <div class="shadow-overlay"></div>
+        <div class="crowd"></div>
+        <div class="crowd2 jump"></div>
+    </div>
+
+    <div class="page-title">
+        <h1>A Hybrid YOLO-LSTM Model for Real-Time Boxing Action Classification</h1>
+    </div>
+
+    <div class="ring-container">
+        <img src="{{ url_for('static', filename='images/ring-boxing1.png') }}" alt="Boxing Ring" class="boxing-ring-img">
+        
+        <div class="ui-overlay">
+            <div class="title-container">
+                <img src="{{ url_for('static', filename='images/glove.png') }}" alt="Boxing Glove Icon" class="glove-icon">
+                <h1>Boxing AI</h1>
+            </div>
+            
+            <h2>Choose Your Mode</h2>
+            
+            <div class="button-container">
+                <a href="{{ url_for('two_player') }}" class="mode-button">Two-Player Fight</a>
+                <a href="{{ url_for('shadow_boxing') }}" class="mode-button">Shadow Boxing</a>
+            </div>
+
+            <div class="user-lookup-card">
+                <h3>Lookup Username</h3>
+                <label for="userIdInput">User ID</label>
+                <input id="userIdInput" type="text" placeholder="Enter user ID">
+                <button id="lookupUserButton" type="button" class="mode-button">Get Username</button>
+                <p id="userLookupResult">Enter a user ID to fetch the username from SQLite.</p>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .user-lookup-card {
+            margin-top: 24px;
+            padding: 18px;
+            border-radius: 16px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: min(100%, 360px);
+        }
+
+        .user-lookup-card input {
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .user-lookup-card input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .user-lookup-card .mode-button {
+            text-align: center;
+        }
+
+        .user-lookup-card p {
+            margin: 0;
+            min-height: 24px;
+        }
+    </style>
+
+    <script src="{{ url_for('static', filename='js/homepage.js') }}"></script>
+</body>
+</html>
